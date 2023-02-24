@@ -1,19 +1,30 @@
+# Clone mxpv/podsync for latest commit
+FROM alpine/git:latest AS cloner
+LABEL stage=clone
+WORKDIR /workspace
+RUN git clone https://github.com/mxpv/podsync.git
+
+# Build from latest commit
 FROM golang:alpine AS builder
-# UPSTREAM_VERSION can be changed, by passing `--build-arg UPSTREAM_VERSION=<new version>` during docker build
-ARG UPSTREAM_VERSION=master
-ENV UPSTREAM_VERSION=${UPSTREAM_VERSION}
 LABEL stage=builder
 WORKDIR /workspace
-#hadolint ignore=DL4006
-RUN wget -nv -O - https://github.com/mxpv/podsync/archive/${UPSTREAM_VERSION}.tar.gz | tar -xz --strip-components=1; go build -o /bin/podsync ./cmd/podsync
+COPY --from=cloner /workspace/podsync/ .
+RUN go build -o /bin/podsync ./cmd/podsync
 
-FROM alpine:3.17.0
+FROM alpine:latest
 WORKDIR /app/
-# hadolint ignore=DL3018,DL3017
 RUN apk --no-cache upgrade && \
-    apk --no-cache add ca-certificates ffmpeg tzdata python3 && \
-    wget -q -O /usr/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp && \
-    chmod +x /usr/bin/yt-dlp && \
-    ln -s /usr/bin/yt-dlp /usr/bin/youtube-dl
+  apk --no-cache add ca-certificates ffmpeg tzdata python3 && \
+  wget -q -O /usr/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp && \
+  chmod +x /usr/bin/yt-dlp && \
+  ln -s /usr/bin/yt-dlp /usr/bin/youtube-dl
+RUN apk add --no-cache gawk
 COPY --from=builder /bin/podsync .
-CMD ["/app/podsync"]
+COPY copy.sh .
+RUN chmod +x copy.sh
+
+# Run podsync in headless mode
+# CMD ["/app/podsync", "--headless"]
+
+# Run script to prepare environment variables and execute Podsync
+CMD ["./copy.sh"]
