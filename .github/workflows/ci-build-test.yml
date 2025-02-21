@@ -1,0 +1,89 @@
+name: "CI: Build & Test"
+
+on:
+  workflow_call:
+    inputs:
+      build_version:
+        required: true
+        type: string
+    secrets:
+      SNYK_TOKEN:
+        required: true
+      YTTOKEN:
+        required: true
+  workflow_dispatch:
+
+env:
+  UPSTREAM_GITHUB_REPOSITORY: "mxpv/podsync"                         # Upstream repo
+
+jobs:
+  quick-build:
+    runs-on: ubuntu-latest
+    outputs:
+      imagename: ${{ env.imagename }}
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      -
+        name: Prepare
+        id: prep
+        run: |
+          IMAGENAME="ttl.sh/$(uuidgen | tr '[:upper:]' '[:lower:]'):3h"
+          echo "imagename=${IMAGENAME}" >> $GITHUB_ENV
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3
+      -
+        name: Build and export
+        id: build
+        uses: docker/build-push-action@0adf9959216b96bec444f325f1e493d4aa344497 # v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.imagename }}
+          build-args: |
+            UPSTREAM_VERSION=${{ inputs.build_version }}
+
+  snyk-scan:
+    needs: [quick-build]
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      -
+        name: Pull docker image
+        id: load
+        run: |
+          docker pull ${{needs.quick-build.outputs.imagename}}
+      -
+        name: Test the image with Snyk for high-severity vulnerabilities
+        uses: snyk/actions/docker@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          image: ${{needs.quick-build.outputs.imagename}}
+          args: --file=Dockerfile --severity-threshold=high
+
+  function-test:
+    needs: [quick-build]
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      -
+        name: Pull docker image
+        id: load
+        run: |
+          docker pull ${{needs.quick-build.outputs.imagename}}
+      -
+        name: Test docker image
+        id: test
+        env:
+          YTTOKEN : ${{secrets.YTTOKEN}}
+          TESTIMAGE: "${{needs.quick-build.outputs.imagename}}"
+        shell: bash
+        run: |
+          test/test.sh
